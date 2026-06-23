@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Boxes, Filter, Search, Warehouse } from 'lucide-react'
 import './App.css'
 
@@ -17,6 +17,9 @@ type StockItem = {
   available: number
   value: number
   purchasePrice: number
+  sheetPrice: number
+  sheetPriceCurrency: string
+  sheetPriceMatch: 'code' | 'name' | 'none'
   barcode: string
   productGroup: string
   equipmentType: string
@@ -38,6 +41,14 @@ type WarehouseResponse = {
     stale?: boolean
     syncing?: boolean
     warning?: string
+    priceCached?: boolean
+    priceComplete?: boolean
+    priceGeneratedAt?: string
+    priceMatched?: number
+    priceRows?: number
+    priceStale?: boolean
+    priceSyncing?: boolean
+    priceWarning?: string
   }
 }
 
@@ -52,6 +63,43 @@ type FilterOption = {
   count: number
 }
 
+type ForeignStockItem = {
+  id: string
+  code: string
+  category: string
+  name: string
+  brand: string
+  supplier: string
+  available: number
+  quantityKnown: boolean
+  price: number
+  currency: string
+  priceType: string
+  priceTrend: 'down' | 'new' | 'same' | 'up'
+  sourcePrice: string
+  updatedAt: string
+  ageDays: number
+  possiblyStale: boolean
+  deliveryBusinessDays: number
+}
+
+type ForeignStockResponse = {
+  items: ForeignStockItem[]
+  meta: {
+    complete: boolean
+    deliveryBusinessDays: number
+    foreignStockSnapshotVersion: number
+    generatedAt: string
+    rows: number
+    staleDays: number
+    cached?: boolean
+    source?: string
+    stale?: boolean
+    syncing?: boolean
+    warning?: string
+  }
+}
+
 type StockDisplayRow = {
   available: number
   barcode: string
@@ -60,11 +108,37 @@ type StockDisplayRow = {
   key: string
   name: string
   pricedUnits: number
+  salePrice: number
+  salePriceCurrency: string
+  salePriceMatch: 'code' | 'name' | 'none'
+  salePriceTotal: number
+  salePricedUnits: number
   purchasePrice: number
   purchasePriceTotal: number
   purchaseValue: number
   section: string
   specs: string[]
+}
+
+type ForeignDisplayRow = {
+  ageDays: number
+  available: number
+  brand: string
+  category: string
+  codes: string[]
+  currency: string
+  deliveryBusinessDays: number
+  key: string
+  name: string
+  offers: number
+  possiblyStale: boolean
+  price: number
+  priceTrend: 'down' | 'new' | 'same' | 'up'
+  priceType: string
+  quantityKnown: boolean
+  sourcePrice: string
+  supplier: string
+  updatedAt: string
 }
 
 async function fetchWarehouseData() {
@@ -76,12 +150,52 @@ async function fetchWarehouseData() {
   return payload as WarehouseResponse
 }
 
+async function fetchForeignStockData() {
+  const response = await fetch('/api/foreign-stock')
+  const payload = await response.json()
+  if (!response.ok) {
+    throw new Error(payload.message || 'Failed to load foreign stock')
+  }
+  return payload as ForeignStockResponse
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('en-US', { currency: 'EUR', style: 'currency' }).format(value)
+}
+
+function formatCurrency(value: number, currency: string) {
+  return new Intl.NumberFormat('en-US', { currency: currency || 'EUR', style: 'currency' }).format(value)
+}
+
+function formatDate(value: Date | string) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '-'
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date)
+}
+
+function addBusinessDays(value: Date, days: number) {
+  const date = new Date(value)
+  date.setHours(12, 0, 0, 0)
+
+  let added = 0
+  while (added < days) {
+    date.setDate(date.getDate() + 1)
+    const day = date.getDay()
+    if (day !== 0 && day !== 6) added += 1
+  }
+
+  return date
+}
+
+function normalizeLookup(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim()
 }
 
 function detectBrand(name: string) {
@@ -92,12 +206,24 @@ function detectBrand(name: string) {
   if (normalized.includes('lenovo') || normalized.includes('thinksystem')) return 'Lenovo'
   if (normalized.includes('ibm')) return 'IBM'
   if (normalized.includes('intel')) return 'Intel'
+  if (normalized.includes('amd ') || normalized.includes('epyc') || normalized.includes('ryzen')) return 'AMD'
   if (normalized.includes('cisco')) return 'Cisco'
   if (normalized.includes('broadcom')) return 'Broadcom'
   if (normalized.includes('nvidia')) return 'NVIDIA'
+  if (normalized.includes('mellanox')) return 'Mellanox'
+  if (normalized.includes('supermicro')) return 'Supermicro'
   if (normalized.includes('seagate')) return 'Seagate'
   if (normalized.includes('samsung')) return 'Samsung'
   if (normalized.includes('kingston')) return 'Kingston'
+  if (normalized.includes('micron')) return 'Micron'
+  if (normalized.includes('kioxia')) return 'Kioxia'
+  if (normalized.includes('toshiba')) return 'Toshiba'
+  if (normalized.includes('western digital') || normalized.includes(' wd ')) return 'Western Digital'
+  if (normalized.includes('hgst')) return 'HGST'
+  if (normalized.includes('huawei')) return 'Huawei'
+  if (normalized.includes('qlogic')) return 'QLogic'
+  if (normalized.includes('emulex')) return 'Emulex'
+  if (normalized.includes('lsi ')) return 'LSI'
   return 'Other'
 }
 
@@ -181,12 +307,12 @@ function sectionOrder(label: string) {
   return 1
 }
 
-function optionBreakdown(items: StockItem[], detector: (item: StockItem) => string) {
+function optionBreakdown<T>(items: T[], detector: (item: T) => string, weight: (item: T) => number = () => 1) {
   const map = new Map<string, number>()
   items.forEach((item) => {
     const label = detector(item)
     if (!label) return
-    map.set(label, (map.get(label) ?? 0) + item.available)
+    map.set(label, (map.get(label) ?? 0) + weight(item))
   })
   return [...map.entries()]
     .map<FilterOption>(([label, count]) => ({ label, count }))
@@ -198,7 +324,7 @@ function selectedOptions(values: string[], options: FilterOption[]) {
   return values.filter((value) => available.has(value))
 }
 
-function filterByOptions(items: StockItem[], values: string[], detector: (item: StockItem) => string) {
+function filterByOptions<T>(items: T[], values: string[], detector: (item: T) => string) {
   if (values.length === 0) return items
   const selected = new Set(values)
   return items.filter((item) => selected.has(detector(item)))
@@ -230,6 +356,11 @@ function groupStockItems(items: StockItem[]) {
         key,
         name: item.name,
         pricedUnits: 0,
+        salePrice: 0,
+        salePriceCurrency: item.sheetPriceCurrency || 'EUR',
+        salePriceMatch: 'none',
+        salePriceTotal: 0,
+        salePricedUnits: 0,
         purchasePrice: 0,
         purchasePriceTotal: 0,
         purchaseValue: 0,
@@ -239,10 +370,17 @@ function groupStockItems(items: StockItem[]) {
 
     current.available += item.available
     current.purchaseValue += item.value
+    if (item.sheetPrice > 0 && item.available > 0) {
+      current.salePriceCurrency = item.sheetPriceCurrency || current.salePriceCurrency
+      current.salePriceMatch = current.salePriceMatch === 'code' ? 'code' : item.sheetPriceMatch
+      current.salePricedUnits += item.available
+      current.salePriceTotal += item.sheetPrice * item.available
+    }
     if (item.purchasePrice > 0 && item.available > 0) {
       current.pricedUnits += item.available
       current.purchasePriceTotal += item.purchasePrice * item.available
     }
+    current.salePrice = current.salePricedUnits > 0 ? current.salePriceTotal / current.salePricedUnits : 0
     current.purchasePrice =
       current.purchaseValue > 0 && current.available > 0
         ? current.purchaseValue / current.available
@@ -274,6 +412,98 @@ function filterSummary(allLabel: string, values: string[]) {
 function resultSummary(rows: StockDisplayRow[]) {
   const pieces = rows.reduce((sum, row) => sum + row.available, 0)
   return `${formatNumber(rows.length)} models / ${formatNumber(pieces)} pcs in stock`
+}
+
+const foreignCategoryOrder = [
+  'Servers',
+  'CPU',
+  'RAM',
+  'HDD',
+  'SSD',
+  'GPU',
+  'Network',
+  'Power Supply',
+  'Chassis',
+  'Cables & Accessories',
+  'Other',
+]
+
+function foreignSectionOrder(label: string) {
+  const index = foreignCategoryOrder.indexOf(label)
+  return index === -1 ? foreignCategoryOrder.length : index
+}
+
+function foreignBrand(item: ForeignStockItem) {
+  return item.brand || detectBrand(item.name)
+}
+
+function foreignStatus(item: ForeignStockItem) {
+  return item.possiblyStale ? 'Possibly stale' : 'Fresh'
+}
+
+function foreignRowsSummary(rows: ForeignDisplayRow[]) {
+  const knownPieces = rows.reduce((sum, row) => sum + (row.quantityKnown ? row.available : 0), 0)
+  const groupedOffers = rows.reduce((sum, row) => sum + row.offers, 0)
+  if (knownPieces > 0) {
+    return `${formatNumber(rows.length)} models / ${formatNumber(knownPieces)} pcs abroad`
+  }
+  return `${formatNumber(rows.length)} models / ${formatNumber(groupedOffers)} offers`
+}
+
+function groupForeignItems(items: ForeignStockItem[]) {
+  const rows = new Map<string, ForeignDisplayRow>()
+
+  items.forEach((item) => {
+    const brand = foreignBrand(item)
+    const category = item.category || 'Other'
+    const key = [category, normalizeLookup(item.name), brand, item.price, item.currency].join('::')
+    const current =
+      rows.get(key) ??
+      ({
+        ageDays: item.ageDays,
+        available: 0,
+        brand,
+        category,
+        codes: [],
+        currency: item.currency || 'EUR',
+        deliveryBusinessDays: item.deliveryBusinessDays,
+        key,
+        name: item.name,
+        offers: 0,
+        possiblyStale: item.possiblyStale,
+        price: item.price,
+        priceTrend: item.priceTrend,
+        priceType: item.priceType,
+        quantityKnown: false,
+        sourcePrice: item.sourcePrice,
+        supplier: item.supplier,
+        updatedAt: item.updatedAt,
+      } satisfies ForeignDisplayRow)
+
+    current.offers += 1
+    if (item.code && !current.codes.includes(item.code)) current.codes.push(item.code)
+    if (item.quantityKnown) {
+      current.available += item.available
+      current.quantityKnown = true
+    }
+
+    if (new Date(item.updatedAt).getTime() > new Date(current.updatedAt).getTime()) {
+      current.ageDays = item.ageDays
+      current.possiblyStale = item.possiblyStale
+      current.priceTrend = item.priceTrend
+      current.sourcePrice = item.sourcePrice
+      current.updatedAt = item.updatedAt
+    }
+
+    rows.set(key, current)
+  })
+
+  return [...rows.values()].sort(
+    (a, b) =>
+      Number(a.possiblyStale) - Number(b.possiblyStale) ||
+      foreignSectionOrder(a.category) - foreignSectionOrder(b.category) ||
+      a.name.localeCompare(b.name),
+  )
 }
 
 function FilterGroup({ allCount, allLabel, onChange, onClear, options, title, values }: FilterGroupProps) {
@@ -310,15 +540,25 @@ function FilterGroup({ allCount, allLabel, onChange, onClear, options, title, va
 }
 
 function App() {
+  const startsOnForeignView = window.location.hash === '#foreign'
   const [data, setData] = useState<WarehouseResponse | null>(null)
+  const [foreignData, setForeignData] = useState<ForeignStockResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isForeignLoading, setIsForeignLoading] = useState(startsOnForeignView)
   const [error, setError] = useState('')
+  const [foreignError, setForeignError] = useState('')
   const [query, setQuery] = useState('')
+  const [foreignQuery, setForeignQuery] = useState('')
   const [brands, setBrands] = useState<string[]>([])
   const [conditions, setConditions] = useState<string[]>([])
   const [formFactors, setFormFactors] = useState<string[]>([])
+  const [foreignBrands, setForeignBrands] = useState<string[]>([])
+  const [foreignStatuses, setForeignStatuses] = useState<string[]>([])
+  const [foreignSuppliers, setForeignSuppliers] = useState<string[]>([])
+  const [foreignSection, setForeignSection] = useState('all')
   const [technologies, setTechnologies] = useState<string[]>([])
   const [section, setSection] = useState('all')
+  const [view, setView] = useState<'local' | 'foreign'>(() => (startsOnForeignView ? 'foreign' : 'local'))
 
   useEffect(() => {
     let isCancelled = false
@@ -341,32 +581,80 @@ function App() {
     }
   }, [])
 
+  const loadForeignStock = useCallback(() => {
+    if (foreignData || isForeignLoading) return
+
+    setIsForeignLoading(true)
+    setForeignError('')
+
+    fetchForeignStockData()
+      .then((payload) => setForeignData(payload))
+      .catch((requestError) => {
+        setForeignError(requestError instanceof Error ? requestError.message : 'Failed to load foreign stock')
+      })
+      .finally(() => setIsForeignLoading(false))
+  }, [foreignData, isForeignLoading])
+
+  useEffect(() => {
+    if (!startsOnForeignView) return
+    let isCancelled = false
+
+    fetchForeignStockData()
+      .then((payload) => {
+        if (!isCancelled) setForeignData(payload)
+      })
+      .catch((requestError) => {
+        if (!isCancelled) {
+          setForeignError(requestError instanceof Error ? requestError.message : 'Failed to load foreign stock')
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) setIsForeignLoading(false)
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [startsOnForeignView])
+
+  function openForeignStock() {
+    if (window.location.hash !== '#foreign') window.history.replaceState(null, '', '#foreign')
+    setView('foreign')
+    loadForeignStock()
+  }
+
   const items = useMemo(() => (data?.items ?? []).filter((item) => item.available > 0), [data])
 
   const sectionItems = useMemo(() => {
     return items.filter((item) => section === 'all' || itemSection(item) === section)
   }, [items, section])
 
-  const brandOptions = useMemo(() => optionBreakdown(sectionItems, (item) => detectBrand(item.name)), [sectionItems])
+  const brandOptions = useMemo(() => optionBreakdown(sectionItems, (item) => detectBrand(item.name), (item) => item.available), [sectionItems])
 
   const selectedBrands = selectedOptions(brands, brandOptions)
   const brandItems = useMemo(() => filterByOptions(sectionItems, selectedBrands, (item) => detectBrand(item.name)), [sectionItems, selectedBrands])
 
-  const formFactorOptions = useMemo(() => optionBreakdown(brandItems, (item) => detectFormFactor(item.name)), [brandItems])
+  const formFactorOptions = useMemo(() => optionBreakdown(brandItems, (item) => detectFormFactor(item.name), (item) => item.available), [brandItems])
   const selectedFormFactors = selectedOptions(formFactors, formFactorOptions)
   const formFactorItems = useMemo(
     () => filterByOptions(brandItems, selectedFormFactors, (item) => detectFormFactor(item.name)),
     [brandItems, selectedFormFactors],
   )
 
-  const technologyOptions = useMemo(() => optionBreakdown(formFactorItems, (item) => detectTechnology(item.name)), [formFactorItems])
+  const technologyOptions = useMemo(
+    () => optionBreakdown(formFactorItems, (item) => detectTechnology(item.name), (item) => item.available),
+    [formFactorItems],
+  )
   const selectedTechnologies = selectedOptions(technologies, technologyOptions)
   const technologyItems = useMemo(
     () => filterByOptions(formFactorItems, selectedTechnologies, (item) => detectTechnology(item.name)),
     [formFactorItems, selectedTechnologies],
   )
 
-  const conditionOptions = useMemo(() => optionBreakdown(technologyItems, (item) => detectCondition(item.name)), [technologyItems])
+  const conditionOptions = useMemo(
+    () => optionBreakdown(technologyItems, (item) => detectCondition(item.name), (item) => item.available),
+    [technologyItems],
+  )
   const selectedConditions = selectedOptions(conditions, conditionOptions)
   const conditionItems = useMemo(
     () => filterByOptions(technologyItems, selectedConditions, (item) => detectCondition(item.name)),
@@ -404,6 +692,65 @@ function App() {
 
   const displayRows = useMemo(() => groupStockItems(filtered), [filtered])
 
+  const foreignItems = useMemo(() => foreignData?.items ?? [], [foreignData])
+
+  const foreignSections = useMemo<SectionSummary[]>(() => {
+    const map = new Map<string, SectionSummary>()
+    foreignItems.forEach((item) => {
+      const label = item.category || 'Other'
+      const current = map.get(label) ?? { sourceType: label, label, rows: 0 }
+      current.rows += 1
+      map.set(label, current)
+    })
+    return [...map.values()].sort((a, b) => foreignSectionOrder(a.label) - foreignSectionOrder(b.label) || b.rows - a.rows)
+  }, [foreignItems])
+
+  const foreignSectionItems = useMemo(
+    () => foreignItems.filter((item) => foreignSection === 'all' || item.category === foreignSection),
+    [foreignItems, foreignSection],
+  )
+
+  const foreignBrandOptions = useMemo(() => optionBreakdown(foreignSectionItems, foreignBrand), [foreignSectionItems])
+  const selectedForeignBrands = selectedOptions(foreignBrands, foreignBrandOptions)
+  const foreignBrandItems = useMemo(
+    () => filterByOptions(foreignSectionItems, selectedForeignBrands, foreignBrand),
+    [foreignSectionItems, selectedForeignBrands],
+  )
+
+  const foreignSupplierOptions = useMemo(() => optionBreakdown(foreignBrandItems, (item) => item.supplier), [foreignBrandItems])
+  const selectedForeignSuppliers = selectedOptions(foreignSuppliers, foreignSupplierOptions)
+  const foreignSupplierItems = useMemo(
+    () => filterByOptions(foreignBrandItems, selectedForeignSuppliers, (item) => item.supplier),
+    [foreignBrandItems, selectedForeignSuppliers],
+  )
+
+  const foreignStatusOptions = useMemo(
+    () => optionBreakdown(foreignSupplierItems, foreignStatus),
+    [foreignSupplierItems],
+  )
+  const selectedForeignStatuses = selectedOptions(foreignStatuses, foreignStatusOptions)
+  const foreignStatusItems = useMemo(
+    () => filterByOptions(foreignSupplierItems, selectedForeignStatuses, foreignStatus),
+    [foreignSupplierItems, selectedForeignStatuses],
+  )
+
+  const hasForeignFilterGroups =
+    foreignBrandOptions.length > 1 ||
+    foreignSupplierOptions.length > 1 ||
+    foreignStatusOptions.length > 1
+
+  const foreignRows = useMemo(() => {
+    const search = foreignQuery.trim().toLowerCase()
+    return foreignStatusItems.filter((item) => {
+      if (!search) return true
+      return [item.name, item.code, foreignBrand(item), item.supplier, item.category].join(' ').toLowerCase().includes(search)
+    })
+  }, [foreignQuery, foreignStatusItems])
+
+  const foreignDisplayRows = useMemo(() => groupForeignItems(foreignRows), [foreignRows])
+  const foreignHasQuantity = foreignDisplayRows.some((item) => item.quantityKnown)
+  const foreignHasSupplier = foreignDisplayRows.some((item) => item.supplier)
+
   return (
     <main className="warehouse-shell">
       <header className="warehouse-header">
@@ -413,6 +760,22 @@ function App() {
         </span>
         <h1>In-stock warehouse</h1>
       </header>
+
+      <div className="view-switch" role="tablist" aria-label="Stock source">
+        <button
+          className={view === 'local' ? 'view-tab active' : 'view-tab'}
+          type="button"
+          onClick={() => {
+            if (window.location.hash === '#foreign') window.history.replaceState(null, '', window.location.pathname)
+            setView('local')
+          }}
+        >
+          Local stock
+        </button>
+        <button className={view === 'foreign' ? 'view-tab active' : 'view-tab'} type="button" onClick={openForeignStock}>
+          Foreign stock
+        </button>
+      </div>
 
       {error ? (
         <section className="notice notice-error" role="alert">
@@ -424,6 +787,27 @@ function App() {
         </section>
       ) : null}
 
+      {view === 'local' && data?.meta.priceWarning ? (
+        <section className="notice notice-warning" role="status">
+          <AlertTriangle size={20} aria-hidden="true" />
+          <div>
+            <strong>Prices did not load</strong>
+            <span>{data.meta.priceWarning}</span>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'foreign' && foreignData?.meta.warning ? (
+        <section className="notice notice-warning" role="status">
+          <AlertTriangle size={20} aria-hidden="true" />
+          <div>
+            <strong>Foreign stock did not sync</strong>
+            <span>{foreignData.meta.warning}</span>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'local' ? (
       <nav className="section-menu" aria-label="Stock sections">
         <button
           className={section === 'all' ? 'section-tab active' : 'section-tab'}
@@ -455,7 +839,39 @@ function App() {
           </button>
         ))}
       </nav>
+      ) : (
+      <nav className="section-menu" aria-label="Foreign stock sections">
+        <button
+          className={foreignSection === 'all' ? 'section-tab active' : 'section-tab'}
+          type="button"
+          onClick={() => {
+            setForeignSection('all')
+            setForeignBrands([])
+            setForeignSuppliers([])
+            setForeignStatuses([])
+          }}
+        >
+          All
+        </button>
+        {foreignSections.map((item) => (
+          <button
+            className={foreignSection === item.label ? 'section-tab active' : 'section-tab'}
+            key={item.label}
+            type="button"
+            onClick={() => {
+              setForeignSection(item.label)
+              setForeignBrands([])
+              setForeignSuppliers([])
+              setForeignStatuses([])
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      )}
 
+      {view === 'local' ? (
       <section className="warehouse-layout">
         <aside className="filters-panel" aria-label="Filters">
           <div className="panel-heading">
@@ -571,6 +987,7 @@ function App() {
                     <th>Section</th>
                     <th>Brand</th>
                     <th>Specs</th>
+                    <th className="num">Price</th>
                     <th className="num">Purchase</th>
                     <th className="num">Available</th>
                   </tr>
@@ -599,6 +1016,9 @@ function App() {
                           <span className="muted">-</span>
                         )}
                       </td>
+                      <td className="num" title={item.salePrice > 0 ? `SUPERBASE match: ${item.salePriceMatch}` : undefined}>
+                        {item.salePrice > 0 ? formatCurrency(item.salePrice, item.salePriceCurrency) : '-'}
+                      </td>
                       <td className="num" title={item.purchaseValue > 0 ? `Stock value: ${formatMoney(item.purchaseValue)}` : undefined}>
                         {item.purchasePrice > 0 ? formatMoney(item.purchasePrice) : '-'}
                       </td>
@@ -611,6 +1031,150 @@ function App() {
           )}
         </section>
       </section>
+      ) : (
+      <section className="warehouse-layout">
+        <aside className="filters-panel" aria-label="Foreign stock filters">
+          <div className="panel-heading">
+            <Filter size={18} aria-hidden="true" />
+            <span>Filters</span>
+          </div>
+
+          {hasForeignFilterGroups ? (
+            <>
+              <FilterGroup
+                allCount={foreignSectionItems.length}
+                allLabel="All brands"
+                onChange={(value) => {
+                  setForeignBrands((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]))
+                  setForeignSuppliers([])
+                  setForeignStatuses([])
+                }}
+                onClear={() => {
+                  setForeignBrands([])
+                  setForeignSuppliers([])
+                  setForeignStatuses([])
+                }}
+                options={foreignBrandOptions}
+                title="Brand"
+                values={selectedForeignBrands}
+              />
+
+              <FilterGroup
+                allCount={foreignBrandItems.length}
+                allLabel="All suppliers"
+                onChange={(value) => {
+                  setForeignSuppliers((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]))
+                  setForeignStatuses([])
+                }}
+                onClear={() => {
+                  setForeignSuppliers([])
+                  setForeignStatuses([])
+                }}
+                options={foreignSupplierOptions}
+                title="Supplier"
+                values={selectedForeignSuppliers}
+              />
+
+              <FilterGroup
+                allCount={foreignSupplierItems.length}
+                allLabel="Any status"
+                onChange={(value) => {
+                  setForeignStatuses((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]))
+                }}
+                onClear={() => setForeignStatuses([])}
+                options={foreignStatusOptions}
+                title="Freshness"
+                values={selectedForeignStatuses}
+              />
+            </>
+          ) : (
+            <p className="empty-filters">No extra filters for this section.</p>
+          )}
+        </aside>
+
+        <section className="foreign-workspace">
+          {foreignError ? (
+            <section className="notice notice-error" role="alert">
+              <AlertTriangle size={20} aria-hidden="true" />
+              <div>
+                <strong>Foreign stock did not load</strong>
+                <span>{foreignError}</span>
+              </div>
+            </section>
+          ) : null}
+
+          <div className="stock-toolbar">
+            <label className="search-field">
+              <Search size={18} aria-hidden="true" />
+              <span className="visually-hidden">Search foreign stock</span>
+              <input
+                value={foreignQuery}
+                onChange={(event) => setForeignQuery(event.target.value)}
+                placeholder="Name, part number, brand"
+              />
+            </label>
+            <div className="result-count">{isForeignLoading ? 'Loading' : foreignRowsSummary(foreignDisplayRows)}</div>
+          </div>
+
+          {isForeignLoading ? (
+            <div className="loading-grid" aria-label="Loading foreign stock">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div className="skeleton-row" key={index} />
+              ))}
+            </div>
+          ) : foreignDisplayRows.length === 0 ? (
+            <div className="empty-state">
+              <Boxes size={34} aria-hidden="true" />
+              <strong>No foreign stock found</strong>
+              <span>Configure the supplier feed or change the search.</span>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="foreign-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Section</th>
+                    <th>Brand</th>
+                    {foreignHasSupplier ? <th>Supplier</th> : null}
+                    <th className="num">Price</th>
+                    {foreignHasQuantity ? <th className="num">Qty</th> : null}
+                    <th>Updated</th>
+                    <th>Estimated delivery</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {foreignDisplayRows.map((item) => (
+                      <tr key={item.key}>
+                        <td className="product-cell">
+                          <strong>{item.name}</strong>
+                          <span>{item.codes.length ? item.codes.slice(0, 3).join(' / ') : '-'}</span>
+                        </td>
+                        <td>
+                          <span className="type-pill">{item.category}</span>
+                        </td>
+                        <td>{item.brand || '-'}</td>
+                        {foreignHasSupplier ? <td>{item.supplier || '-'}</td> : null}
+                        <td className="num">{formatCurrency(item.price, item.currency)}</td>
+                        {foreignHasQuantity ? <td className="num">{item.quantityKnown ? formatNumber(item.available) : '-'}</td> : null}
+                        <td>
+                          <span>{formatDate(item.updatedAt)}</span>
+                          <span className="muted">{formatNumber(item.ageDays)} days ago</span>
+                          {item.possiblyStale ? <span className="stale-note">Possibly stale</span> : null}
+                        </td>
+                        <td className="delivery-cell">
+                          <span>{formatDate(addBusinessDays(new Date(), item.deliveryBusinessDays))}</span>
+                          <span className="muted">Estimate</span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </section>
+      )}
     </main>
   )
 }

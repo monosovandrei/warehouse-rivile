@@ -33,6 +33,36 @@ h1 {
   margin: 0;
 }
 
+.view-switch {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 6px;
+}
+
+.view-tab {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.view-tab.active {
+  background: #111827;
+  border-color: #111827;
+  color: #ffffff;
+}
+
 .notice {
   align-items: flex-start;
   border-radius: 8px;
@@ -46,6 +76,12 @@ h1 {
   background: #fff1f2;
   border: 1px solid #fecdd3;
   color: #9f1239;
+}
+
+.notice-warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
 }
 
 .notice strong,
@@ -94,6 +130,7 @@ h1 {
 }
 
 .filters-panel,
+.foreign-workspace,
 .stock-workspace {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -284,6 +321,7 @@ button:focus-visible {
   margin: 0;
 }
 
+.foreign-workspace,
 .stock-workspace {
   min-width: 0;
   overflow: hidden;
@@ -323,8 +361,12 @@ button:focus-visible {
 
 table {
   border-collapse: collapse;
-  min-width: 1020px;
+  min-width: 1110px;
   width: 100%;
+}
+
+.foreign-table {
+  min-width: 900px;
 }
 
 th,
@@ -375,6 +417,15 @@ td strong {
   margin-top: 3px;
 }
 
+.delivery-cell {
+  white-space: nowrap;
+}
+
+.delivery-cell > span:first-child {
+  color: var(--text-strong);
+  font-weight: 850;
+}
+
 .num {
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -412,6 +463,36 @@ td strong {
   min-height: 23px;
   padding: 2px 7px;
   white-space: nowrap;
+}
+
+.status-pill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  min-height: 24px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.status-pill.fresh {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.status-pill.warning {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.stale-note {
+  color: #92400e;
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  margin-top: 3px;
 }
 
 .loading-grid {
