@@ -1,0 +1,16 @@
+[Unit]
+Description=Servermall Telegram revenue and margin report bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/servermall-report-bot
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+User=servermall-bot
+Group=servermall-bot
+
+[Install]
+WantedBy=multi-user.target

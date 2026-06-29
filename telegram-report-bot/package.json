@@ -1,0 +1,19 @@
+{
+  "name": "servermall-telegram-report-bot",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/bot.ts",
+    "report": "tsx src/print-report.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "tsx": "^4.22.4",
+    "typescript": "~6.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3"
+  }
+}
