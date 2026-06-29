@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Boxes, Filter, Search, Warehouse } from 'lucide-react'
+import { AlertTriangle, Boxes, Clock, Filter, Search, Warehouse } from 'lucide-react'
 import './App.css'
 
 type StockItem = {
@@ -141,6 +141,15 @@ type ForeignDisplayRow = {
   updatedAt: string
 }
 
+type SyncBadgeProps = {
+  label: string
+  timestamp?: string
+  hasWarning?: boolean
+  isLoading?: boolean
+  isStale?: boolean
+  isSyncing?: boolean
+}
+
 async function fetchWarehouseData() {
   const response = await fetch('/api/warehouse')
   const payload = await response.json()
@@ -175,6 +184,29 @@ function formatDate(value: Date | string) {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return '-'
   return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(date)
+}
+
+function formatSyncTimestamp(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+}
+
+function syncStateLabel({ hasWarning, isLoading, isStale, isSyncing, timestamp }: SyncBadgeProps) {
+  if (isLoading && !timestamp) return 'Loading'
+  if (!timestamp) return 'No successful sync'
+  if (isSyncing) return 'Refreshing'
+  if (isStale) return 'Stale cache'
+  if (hasWarning) return 'Needs attention'
+  return 'Updated'
 }
 
 function addBusinessDays(value: Date, days: number) {
@@ -539,6 +571,27 @@ function FilterGroup({ allCount, allLabel, onChange, onClear, options, title, va
   )
 }
 
+function SyncBadge(props: SyncBadgeProps) {
+  const { label, timestamp } = props
+  const timestampLabel = formatSyncTimestamp(timestamp)
+  const classes = ['sync-badge']
+
+  if (props.isStale) classes.push('stale')
+  if (props.isSyncing) classes.push('syncing')
+  if (props.hasWarning && !timestampLabel) classes.push('warning')
+
+  return (
+    <div className={classes.join(' ')} role="status" aria-live="polite">
+      <Clock size={17} aria-hidden="true" />
+      <div className="sync-badge-text">
+        <span className="sync-badge-label">{label}</span>
+        <strong>{timestampLabel ? <time dateTime={timestamp}>{timestampLabel}</time> : syncStateLabel(props)}</strong>
+      </div>
+      {timestampLabel ? <span className="sync-badge-state">{syncStateLabel(props)}</span> : null}
+    </div>
+  )
+}
+
 function App() {
   const startsOnForeignView = window.location.hash === '#foreign'
   const [data, setData] = useState<WarehouseResponse | null>(null)
@@ -761,20 +814,42 @@ function App() {
         <h1>In-stock warehouse</h1>
       </header>
 
-      <div className="view-switch" role="tablist" aria-label="Stock source">
-        <button
-          className={view === 'local' ? 'view-tab active' : 'view-tab'}
-          type="button"
-          onClick={() => {
-            if (window.location.hash === '#foreign') window.history.replaceState(null, '', window.location.pathname)
-            setView('local')
-          }}
-        >
-          Local stock
-        </button>
-        <button className={view === 'foreign' ? 'view-tab active' : 'view-tab'} type="button" onClick={openForeignStock}>
-          Foreign stock
-        </button>
+      <div className="view-status-row">
+        <div className="view-switch" role="tablist" aria-label="Stock source">
+          <button
+            className={view === 'local' ? 'view-tab active' : 'view-tab'}
+            type="button"
+            onClick={() => {
+              if (window.location.hash === '#foreign') window.history.replaceState(null, '', window.location.pathname)
+              setView('local')
+            }}
+          >
+            Local stock
+          </button>
+          <button className={view === 'foreign' ? 'view-tab active' : 'view-tab'} type="button" onClick={openForeignStock}>
+            Foreign stock
+          </button>
+        </div>
+
+        {view === 'local' ? (
+          <SyncBadge
+            hasWarning={Boolean(error || data?.meta.warning)}
+            isLoading={isLoading}
+            isStale={data?.meta.stale}
+            isSyncing={data?.meta.syncing}
+            label="Rivile snapshot"
+            timestamp={data?.meta.generatedAt}
+          />
+        ) : (
+          <SyncBadge
+            hasWarning={Boolean(foreignError || foreignData?.meta.warning)}
+            isLoading={isForeignLoading}
+            isStale={foreignData?.meta.stale}
+            isSyncing={foreignData?.meta.syncing}
+            label="Price source"
+            timestamp={foreignData?.meta.complete ? foreignData.meta.generatedAt : undefined}
+          />
+        )}
       </div>
 
       {error ? (
