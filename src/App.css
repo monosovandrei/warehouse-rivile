@@ -33,6 +33,14 @@ h1 {
   margin: 0;
 }
 
+.view-status-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
 .view-switch {
   align-items: center;
   background: var(--surface);
@@ -40,7 +48,6 @@ h1 {
   border-radius: 8px;
   display: inline-flex;
   gap: 6px;
-  margin-bottom: 12px;
   padding: 6px;
 }
 
@@ -61,6 +68,80 @@ h1 {
   background: #111827;
   border-color: #111827;
   color: #ffffff;
+}
+
+.sync-badge {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 10px;
+  min-height: 48px;
+  min-width: 280px;
+  padding: 7px 10px;
+}
+
+.sync-badge svg {
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.sync-badge-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sync-badge-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.sync-badge strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-badge-state {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  margin-left: auto;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+
+.sync-badge.stale {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.sync-badge.stale svg,
+.sync-badge.stale .sync-badge-state,
+.sync-badge.warning svg {
+  color: #92400e;
+}
+
+.sync-badge.syncing .sync-badge-state {
+  color: #1d4ed8;
+}
+
+.sync-badge.warning {
+  background: #fff1f2;
+  border-color: #fecdd3;
 }
 
 .notice {
@@ -550,9 +631,19 @@ td strong {
   }
 
   .warehouse-header,
+  .view-status-row,
   .stock-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .sync-badge,
+  .view-switch {
+    width: 100%;
+  }
+
+  .view-tab {
+    flex: 1 1 0;
   }
 
   .warehouse-layout {
@@ -568,5 +659,14 @@ td strong {
 @media (max-width: 560px) {
   h1 {
     font-size: 25px;
+  }
+
+  .sync-badge {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .sync-badge-state {
+    margin-left: 0;
   }
 }
