@@ -43,7 +43,9 @@ type MutableSalesReportGroup = SalesReportGroup & {
   documentQuantities: Map<string, number>
 }
 
-type RivileRecord = Record<string, RivileRecord | RivileRecord[] | string | undefined>
+type RivileRecord = {
+  [key: string]: RivileRecord | RivileRecord[] | string | undefined
+}
 
 const maxPageLimit = 5000
 const rivileUrl = process.env.RIVILE_API_URL ?? 'https://api.manorivile.lt/client/v2'
@@ -140,10 +142,10 @@ async function rivileRequest<T extends RivileRecord>(method: string, params: Rec
 
     if (response.ok) {
       const resultKey = method.match(/(?:GET|EDIT)_([A-Z]\d{2})/)?.[1]
-      const payloadRecord = payload as Record<string, T[] | T | Record<string, T[] | T | undefined> | undefined>
+      const payloadRecord = payload as Record<string, unknown>
       const nestedPayload = payloadRecord.RET_DOK
       const rows =
-        (resultKey ? payloadRecord[resultKey] : undefined) ??
+        (resultKey ? (payloadRecord[resultKey] as T[] | T | undefined) : undefined) ??
         (resultKey && nestedPayload && typeof nestedPayload === 'object'
           ? (nestedPayload as Record<string, T[] | T | undefined>)[resultKey]
           : undefined)
@@ -428,7 +430,7 @@ async function loadSalesReportForWindow(window: SalesReportWindow): Promise<Mont
     const sign = operationType === '52' ? -1 : 1
     vat += Math.abs(numberValue(document.I06_SUMA_PVM)) * sign
 
-    const lines = Array.isArray(document.I07) ? document.I07 : document.I07 ? [document.I07] : []
+    const lines = (Array.isArray(document.I07) ? document.I07 : document.I07 ? [document.I07] : []) as RivileRecord[]
     lines.forEach((line) => {
       const revenue = Math.abs(numberValue(line.I07_SUMA)) * sign
       const signedCost = -Math.abs(numberValue(line.I07_SAVIKAINA)) * sign
