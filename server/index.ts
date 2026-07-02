@@ -5,6 +5,7 @@ import { createSign } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import { loadCurrentMonthSalesReport } from './sales-report.ts'
 
 const app = express()
 const port = Number(process.env.PORT ?? 5174)
@@ -284,7 +285,14 @@ async function rivileRequest<T extends RivileRecord>(method: string, params: Rec
     }
 
     if (response.ok) {
-      const rows = (payload as Record<string, T[] | T | undefined>)[method.includes('N17') ? 'N17' : 'I17']
+      const resultKey = method.match(/(?:GET|EDIT)_([A-Z]\d{2})/)?.[1] ?? (method.includes('N17') ? 'N17' : 'I17')
+      const payloadRecord = payload as Record<string, T[] | T | Record<string, T[] | T | undefined> | undefined>
+      const nestedPayload = payloadRecord.RET_DOK
+      const rows =
+        payloadRecord[resultKey] ??
+        (nestedPayload && typeof nestedPayload === 'object'
+          ? (nestedPayload as Record<string, T[] | T | undefined>)[resultKey]
+          : undefined)
       if (!rows) return []
       return Array.isArray(rows) ? rows : [rows]
     }
@@ -1213,6 +1221,16 @@ app.get('/api/foreign-stock', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       message: error instanceof Error ? error.message : 'Unknown foreign stock API error',
+    })
+  }
+})
+
+app.get('/api/monthly-sales-report', async (_req, res) => {
+  try {
+    res.json(await loadCurrentMonthSalesReport())
+  } catch (error) {
+    res.status(500).json({
+      message: error instanceof Error ? error.message : 'Unknown sales report API error',
     })
   }
 })

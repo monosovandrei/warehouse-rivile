@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm:server\" \"npm:client\"",
+    "bot": "tsx server/telegram-report-bot.ts",
+    "bot:report": "tsx server/print-monthly-sales-report.ts",
     "client": "vite",
     "server": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
